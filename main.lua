@@ -1,113 +1,94 @@
--- main.lua
-
-local character = {
-    x = 100,
-    y = 100,
-    speed = 100,
+local player = {
+    x = 0, y = 0,
+    width = 0, height = 0,
+    speed = 120,
     dir = "right",
-    frame = 1,
-    timer = 0,
-    frameDelay = 0.15,
-    frameWidth = 32,
-    frameHeight = 32,
-    scale = 3,
-    animations = {
-        left = {},
-        right = {}
-    },
-    spritesheets = {
-        left = nil,
-        right = nil
-    }
+    animTimer = 0,
+    animFrame = 1,
+    isMoving = false
 }
 
-function loadAnimation(image, frameWidth, frameHeight)
-    local frames = {}
-    local imageHeight = image:getHeight()
-    local frameCount = imageHeight / frameHeight
+local frameCount = 3
+local groundImage, charL, charR
+local camX, camY
+local camScale = 2
 
-    for i = 0, frameCount - 1 do
-        local quad = love.graphics.newQuad(
-            0, i * frameHeight,
-            frameWidth, frameHeight,
-            image:getDimensions()
-        )
-        table.insert(frames, quad)
-    end
-
-    return frames
-end
+local groundWidth, groundHeight
 
 function love.load()
-    -- Load and set pixel-perfect filtering
-    character.spritesheets.left = love.graphics.newImage("Sprites/charL.png")
-    character.spritesheets.right = love.graphics.newImage("Sprites/charR.png")
-    character.spritesheets.left:setFilter("nearest", "nearest")
-    character.spritesheets.right:setFilter("nearest", "nearest")
+    groundImage = love.graphics.newImage("Sprites/ground.png")
+    charR = love.graphics.newImage("Sprites/charR.png")
+    charL = love.graphics.newImage("Sprites/charL.png")
 
-    character.animations.left = loadAnimation(character.spritesheets.left, character.frameWidth, character.frameHeight)
-    character.animations.right = loadAnimation(character.spritesheets.right, character.frameWidth, character.frameHeight)
+    groundImage:setFilter("nearest", "nearest")
+    charR:setFilter("nearest", "nearest")
+    charL:setFilter("nearest", "nearest")
+
+    groundWidth = groundImage:getWidth()
+    groundHeight = groundImage:getHeight()
+
+    player.width = charR:getWidth()
+    player.height = charR:getHeight() / frameCount
+
+    player.x = groundWidth / 2 - player.width / 2
+    player.y = groundHeight / 2 - player.height / 2
+end
+
+function clamp(val, min, max)
+    return math.max(min, math.min(max, val))
 end
 
 function love.update(dt)
-    local moving = false
-    local vx, vy = 0, 0
+    local moveX, moveY = 0, 0
+    player.isMoving = false
 
-    if love.keyboard.isDown("a") then vx = vx - 1 end
-    if love.keyboard.isDown("d") then vx = vx + 1 end
-    if love.keyboard.isDown("w") then vy = vy - 1 end
-    if love.keyboard.isDown("s") then vy = vy + 1 end
+    if love.keyboard.isDown("w") then moveY = moveY - 1 end
+    if love.keyboard.isDown("s") then moveY = moveY + 1 end
+    if love.keyboard.isDown("a") then moveX = moveX - 1; player.dir = "left" end
+    if love.keyboard.isDown("d") then moveX = moveX + 1; player.dir = "right" end
 
-    if vx ~= 0 or vy ~= 0 then
-        moving = true
-        local len = math.sqrt(vx * vx + vy * vy)
-        vx, vy = vx / len, vy / len
-    end
+    local len = math.sqrt(moveX^2 + moveY^2)
+    if len > 0 then
+        moveX, moveY = moveX / len, moveY / len
+        player.isMoving = true
 
-    character.x = character.x + vx * character.speed * dt
-    character.y = character.y + vy * character.speed * dt
+        local nextX = player.x + moveX * player.speed * dt
+        local nextY = player.y + moveY * player.speed * dt
 
-    if vx < 0 then character.dir = "left"
-    elseif vx > 0 then character.dir = "right" end
+        -- Invisible boundary collision (can't leave ground image)
+        nextX = clamp(nextX, 0, groundWidth - player.width)
+        nextY = clamp(nextY, 0, groundHeight - player.height)
 
-    if character.dir ~= "left" and character.dir ~= "right" then
-        character.dir = "right"
-    end
+        player.x = nextX
+        player.y = nextY
 
-    local totalFrames = #character.animations[character.dir]
-    if moving then
-        character.timer = character.timer + dt
-        if character.timer >= character.frameDelay then
-            character.timer = 0
-            character.frame = character.frame + 1
-            if character.frame > totalFrames then
-                character.frame = 1
-            end
+        player.animTimer = player.animTimer + dt
+        if player.animTimer > 0.15 then
+            player.animFrame = (player.animFrame % frameCount) + 1
+            player.animTimer = 0
         end
     else
-        character.frame = 1
+        player.animFrame = 1
     end
 
-    if character.frame < 1 or character.frame > totalFrames then
-        character.frame = 1
-    end
+    camX = player.x + player.width / 2 - love.graphics.getWidth() / (2 * camScale)
+    camY = player.y + player.height / 2 - love.graphics.getHeight() / (2 * camScale)
 end
 
 function love.draw()
-    local sprite = character.spritesheets[character.dir]
-    local quad = character.animations[character.dir][character.frame]
+    love.graphics.scale(camScale)
+    love.graphics.translate(-camX, -camY)
 
-    if sprite and quad then
-        love.graphics.draw(
-            sprite,
-            quad,
-            character.x,
-            character.y,
-            0,
-            character.scale,
-            character.scale
-        )
+    -- Draw ground (single background image)
+    love.graphics.draw(groundImage, 0, 0)
+
+    -- Draw player
+    local quad
+    if player.dir == "right" then
+        quad = love.graphics.newQuad(0, (player.animFrame - 1) * player.height, player.width, player.height, charR:getDimensions())
+        love.graphics.draw(charR, quad, player.x, player.y)
     else
-        love.graphics.print("ERROR: Sprite or quad missing", 10, 10)
+        quad = love.graphics.newQuad((player.animFrame - 1) * player.width, 0, player.width, player.height, charL:getDimensions())
+        love.graphics.draw(charL, quad, player.x, player.y)
     end
 end
