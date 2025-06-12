@@ -1,4 +1,5 @@
 local rain = require("rain")
+local boat = require("boat")
 
 local player = {
     x = 0, y = 0,
@@ -10,36 +11,33 @@ local player = {
 }
 
 local camX, camY = 0, 0
-local map = {}
-local mapWidth, mapHeight = 1280, 1280
-local groundImage
+groundImage = nil
 local charR, charL
 local frameW, frameH = 32, 32
-local numFramesR = 1
-local numFramesL = 1
+local numFramesR, numFramesL = 1, 1
+
+mapWidth, mapHeight = 1280, 1280
 
 function love.load()
     love.window.setMode(800, 600)
+
     groundImage = love.graphics.newImage("Sprites/ground.png")
     groundImage:setWrap("clamp", "clamp")
 
-    -- Load character sprites
     charR = love.graphics.newImage("Sprites/charR.png")
     charL = love.graphics.newImage("Sprites/charL.png")
     charR:setFilter("nearest", "nearest")
     charL:setFilter("nearest", "nearest")
 
-    frameW = 32
-    frameH = 32
-
+    frameW, frameH = 32, 32
     numFramesR = math.floor(charR:getHeight() / frameH)
     numFramesL = math.floor(charL:getWidth() / frameW)
 
-    -- Start in center
     player.x = mapWidth / 2
     player.y = mapHeight / 2
 
     rain.load()
+    boat.load()
 end
 
 function love.update(dt)
@@ -58,12 +56,10 @@ function love.update(dt)
         local nextX = player.x + moveX * player.speed * dt
         local nextY = player.y + moveY * player.speed * dt
 
-        -- Boundaries
         if nextX > 16 and nextX < mapWidth - 16 then player.x = nextX end
         if nextY > 16 and nextY < mapHeight - 16 then player.y = nextY end
     end
 
-    -- Animate
     if isMoving then
         player.animTimer = player.animTimer + dt
         if player.animTimer >= player.animSpeed then
@@ -81,23 +77,41 @@ function love.update(dt)
     camY = player.y - love.graphics.getHeight() / 2
 
     rain.update(dt, camX, camY)
+    boat.update(dt, player)
 end
 
 function love.draw()
     love.graphics.push()
     love.graphics.translate(-camX, -camY)
 
-    -- Draw ground centered
-    love.graphics.draw(groundImage, mapWidth / 2, mapHeight / 2, 0, mapWidth / groundImage:getWidth(), mapHeight / groundImage:getHeight(), groundImage:getWidth() / 2, groundImage:getHeight() / 2)
-
-    -- Draw character
-    local sx, sy = 2, 2 -- scale character up
-    if player.dir == "right" then
-        love.graphics.draw(charR, love.graphics.newQuad(0, (player.frame - 1) * frameH, frameW, frameH, charR:getWidth(), charR:getHeight()), player.x, player.y, 0, sx, sy, frameW / 2, frameH / 2)
-    else
-        love.graphics.draw(charL, love.graphics.newQuad((player.frame - 1) * frameW, 0, frameW, frameH, charL:getWidth(), charL:getHeight()), player.x, player.y, 0, sx, sy, frameW / 2, frameH / 2)
+    if groundImage then
+        love.graphics.draw(
+            groundImage,
+            mapWidth / 2, mapHeight / 2,
+            0,
+            mapWidth / groundImage:getWidth(),
+            mapHeight / groundImage:getHeight(),
+            groundImage:getWidth() / 2,
+            groundImage:getHeight() / 2
+        )
     end
 
+    local sx, sy = 2, 2
+    if player.dir == "right" then
+        love.graphics.draw(
+            charR,
+            love.graphics.newQuad(0, (player.frame - 1) * frameH, frameW, frameH, charR:getWidth(), charR:getHeight()),
+            player.x, player.y, 0, sx, sy, frameW / 2, frameH / 2
+        )
+    else
+        love.graphics.draw(
+            charL,
+            love.graphics.newQuad((player.frame - 1) * frameW, 0, frameW, frameH, charL:getWidth(), charL:getHeight()),
+            player.x, player.y, 0, sx, sy, frameW / 2, frameH / 2
+        )
+    end
+
+    boat.draw()
     rain.draw(camX, camY)
 
     love.graphics.pop()
