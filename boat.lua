@@ -45,6 +45,12 @@ function boat.update(dt, player)
                     checked = true
                     boatVisible = false
                     groundImage = love.graphics.newImage("Sprites/cafe_0.png")
+                    groundImage:setFilter("nearest", "nearest")
+                    groundImageName = "Sprites/cafe_0.png"
+                    mapWidth = groundImage:getWidth() * 2
+                    mapHeight = groundImage:getHeight() * 2
+                    player.x = mapWidth / 2
+                    player.y = mapHeight / 2
                     boatImage = nil
                     imageData = nil
                 end

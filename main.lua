@@ -1,5 +1,6 @@
 local rain = require("rain")
 local boat = require("boat")
+local menu = require("menu") -- Add menu require
 
 local player = {
     x = 0, y = 0,
@@ -12,17 +13,22 @@ local player = {
 
 local camX, camY = 0, 0
 groundImage = nil
+groundImageName = "" -- used to check which background image is active
 local charR, charL
 local frameW, frameH = 32, 32
 local numFramesR, numFramesL = 1, 1
 
 mapWidth, mapHeight = 1280, 1280
 
+local gameState = "menu" -- Add game state
+
 function love.load()
     love.window.setMode(800, 600)
 
     groundImage = love.graphics.newImage("Sprites/ground.png")
     groundImage:setWrap("clamp", "clamp")
+    groundImage:setFilter("nearest", "nearest")
+    groundImageName = "Sprites/ground.png"
 
     charR = love.graphics.newImage("Sprites/charR.png")
     charL = love.graphics.newImage("Sprites/charL.png")
@@ -38,9 +44,18 @@ function love.load()
 
     rain.load()
     boat.load()
+    menu.load() -- Load menu
 end
 
 function love.update(dt)
+    if gameState == "menu" then
+        menu.update(dt)
+        if menu.shouldStartGame() then
+            gameState = "play"
+        end
+        return
+    end
+
     local moveX, moveY = 0, 0
     local isMoving = false
 
@@ -81,16 +96,26 @@ function love.update(dt)
 end
 
 function love.draw()
+    if gameState == "menu" then
+        menu.draw()
+        return
+    end
+
     love.graphics.push()
     love.graphics.translate(-camX, -camY)
 
     if groundImage then
+        local scale = 1
+        if groundImageName == "Sprites/cafe_0.png" then
+            scale = 0.5
+        end
+
         love.graphics.draw(
             groundImage,
             mapWidth / 2, mapHeight / 2,
             0,
-            mapWidth / groundImage:getWidth(),
-            mapHeight / groundImage:getHeight(),
+            (mapWidth / groundImage:getWidth()) * scale,
+            (mapHeight / groundImage:getHeight()) * scale,
             groundImage:getWidth() / 2,
             groundImage:getHeight() / 2
         )
@@ -115,4 +140,11 @@ function love.draw()
     rain.draw(camX, camY)
 
     love.graphics.pop()
+end
+
+function love.mousepressed(x, y, button)
+    if gameState == "menu" then
+        menu.mousepressed(x, y, button)
+    end
+    -- else: handle mouse input for other states if needed
 end
