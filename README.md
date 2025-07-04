@@ -1,5 +1,5 @@
 # AI Auditor Primers
-This repository contains open-source Primer documents to be ingested by AI prior to conduct smart contract audits.
+This repository contains open-source Primer documents to be ingested by AI prior to conducting smart contract audits.
 
 The currently available Primers are:
 * [Amy](https://github.com/devdacian/ai-auditor-primers/blob/main/primers/amy.vault.erc4626.primer.md) - Vault / [ERC4626](https://ethereum.org/en/developers/docs/standards/tokens/erc-4626/) Specialist AI Auditor
