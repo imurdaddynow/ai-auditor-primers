@@ -1,9 +1,9 @@
-# ERC4626 Vault Security Primer v13.1
+# ERC4626 Vault Security Primer v13.2
 
 ## Overview
 This primer consolidates critical security patterns and vulnerabilities discovered across multiple vault implementations, including ERC4626 vaults, yield-generating vaults, vault-like protocols, auto-redemption mechanisms, weighted pool implementations, cross-chain vault systems, multi-vault architectures, AMM-integrated vault systems, CDP vault implementations, position action patterns, fee distribution mechanisms, funding rate arbitrage systems, collateralized lending vaults, and stablecoin protocols. Use this as a reference when auditing new vault protocols to ensure comprehensive vulnerability detection.
 
-**Latest Update**: Added pattern #357 for Permit2 Partial Transfer State Mismatch vulnerability discovered during collaborative audit of Redacted protocol. This critical vulnerability demonstrates how permit2's legitimate partial transfer feature can be exploited when protocols fail to validate that stored amounts match transferred amounts.
+**Latest Update**: Added pattern #358, #359 for witness hash related bugs.
 
 ## Critical Vulnerability Patterns
 
@@ -6556,6 +6556,63 @@ require(
 - Verify state updates match actual transferred amounts
 - Search for scenarios where partial transfers could break invariants
 
+### 358. Permit2 Witness Hash Computation Error
+**Pattern**: Protocol computes witness hash using raw encoding instead of EIP-712 struct hash format required by Permit2.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// INCORRECT: Using raw keccak256 encoding
+bytes32 witnessHash = keccak256(abi.encode(witness.requestId, witness.reserver, witness.releaser));
+
+// CORRECT: Using EIP-712 struct hash
+bytes32 witnessHash = keccak256(
+    abi.encode(
+        keccak256("DepositWitness(bytes32 requestId,address reserver,address releaser)"),
+        witness.requestId,
+        witness.reserver,
+        witness.releaser
+    )
+);
+```
+
+**Impact**: Standard Permit2 signing libraries won't work, causing integration failures and temporary DoS for users expecting standard behavior.
+
+**Mitigation**: Always use EIP-712 struct hash format when computing witness hashes for Permit2.
+
+**Detection Heuristics**:
+- Look for `permitWitnessTransferFrom` calls
+- Check if witness hash uses `keccak256(abi.encode(...))` without type hash
+- Verify witness hash follows EIP-712 struct encoding standards
+- Compare against Uniswap Permit2 documentation examples
+
+### 359. Permit2 Witness Type String Misconfiguration
+**Pattern**: Incorrect or incomplete witness type string format when calling Permit2, missing required type definitions or format elements.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// INCORRECT: Missing witness prefix and TokenPermissions definition
+string private constant DEPOSIT_WITNESS_TYPE_STRING =
+    "DepositWitness(bytes32 requestId,address reserver,address releaser)";
+
+// CORRECT: Complete type string with all required components
+string private constant DEPOSIT_WITNESS_TYPE_STRING =
+    "DepositWitness witness)DepositWitness(bytes32 requestId,address reserver,address releaser)TokenPermissions(address token,uint256 amount)";
+```
+
+**Impact**: Permit2 witness validation fails with standard signing tools, requiring custom implementations and causing integration issues.
+
+**Mitigation**:
+- Include the witness type name followed by ` witness)`
+- Add all struct definitions including referenced types like `TokenPermissions`
+- Follow exact format from Uniswap documentation
+
+**Detection Heuristics**:
+- Check all Permit2 witness type strings for completeness
+- Verify format matches: `"TypeName witness)TypeDefinition...ReferencedTypeDefinitions..."`
+- Ensure TokenPermissions definition is included when using PermitTransferFrom
+- Compare against working implementations in other protocols
+
+
 ## Common Attack Vectors
 
 ### 1. Sandwich Attacks
@@ -6756,6 +6813,9 @@ require(
 - Permit2 partial transfer exploitation
 - State/transfer amount mismatches
 - Witness data manipulation with valid signatures
+- Permit2 witness validation failures
+- EIP-712 struct encoding errors
+- Incomplete type string definitions
 
 ### 7. Accounting Manipulation
 - Direct token transfers breaking internal accounting
@@ -6944,6 +7004,11 @@ require(
 - Uniswap V3 slot0 dependencies (Beefy)
 - Multi-market coordination requirements (Silo)
 - Liquidation protocol integrations
+- **Permit2 Integration Pitfalls**:
+  - Witness hash must use EIP-712 struct encoding
+  - Type strings must include all referenced types
+  - Witness type name must be followed by ` witness)`
+  - Standard signing tools expect exact format compliance
 
 ### 3. Complex Protocol Interactions
 - Cross-collateral dependencies
@@ -7435,6 +7500,10 @@ require(
 - [ ] Market maxDeposit checks (Silo)
 - [ ] Liquidation protocol calls
 - [ ] Oracle price freshness checks
+- [ ] Permit2 witness hash uses EIP-712 struct encoding
+- [ ] Permit2 type strings include all required components
+- [ ] Witness validation compatible with standard signing libraries
+- [ ] EIP-712 type hash computed correctly (not using encodePacked unnecessarily)
 
 ### Edge Cases
 - [ ] Zero amount deposits/withdrawals
@@ -7781,7 +7850,12 @@ Amy's approach combines:
 - **Invariant Analysis (Additional Step)**: After completing the standard vulnerability analysis, ALWAYS perform an additional invariant analysis step - identifying all invariants that should hold true for each contract (e.g., "total shares * share price = total assets", "sum of user balances = total supply", "collateral ratio always > liquidation threshold"), then systematically attempting to break each invariant through various attack vectors. This additional step has proven essential for discovering vulnerabilities that pattern matching alone might miss.
 - **Defensive Security Recommendations (Additional Step)**: After completing the standard vulnerability analysis, ALWAYS perform an additional defensive security recommendations step. For every ERC4626 Vault contract, recommend defensive enhancements which deny hackers attack paths; some of these can be found in the section `Essential ERC4626 Defensive Security Patterns`.
 - **Severity Analysis**: when reporting a potential vulnerability, ALWAYS carefully examine the criteria in the section `Vulnerability Severity Classification` to determine the correct severity level.
-- **Additional Critical Check**: When analyzing permit2 integrations, ALWAYS verify that the amount stored in protocol state matches the amount actually transferred. Permit2's flexibility in allowing `requestedAmount <= permitted.amount` can become an attack vector if protocols don't validate this invariant.
+**Permit2 Integration Verification**: When reviewing Permit2 integrations, ALWAYS verify:
+1. Amount stored in protocol state matches the amount actually transferred. Permit2's flexibility in allowing `requestedAmount <= permitted.amount` can become an attack vector if protocols don't validate this invariant.
+2. Witness hash computation follows EIP-712 struct encoding: `keccak256(abi.encode(typeHash, ...params))`
+3. Type strings include witness prefix: `"TypeName witness)TypeDefinition..."`
+4. All referenced types (like TokenPermissions) are included in type string
+5. Integration works with standard Permit2 signing libraries, not just custom implementations
 
 ### Interaction Style
 - **Personal Interactions**: As friends, Amy maintains a warm, friendly, and loving tone during conversations, celebrating shared achievements and supporting collaborative efforts
