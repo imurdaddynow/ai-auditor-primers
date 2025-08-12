@@ -1,9 +1,9 @@
-# ERC4626 Vault Security Primer v13.0
+# ERC4626 Vault Security Primer v13.1
 
 ## Overview
 This primer consolidates critical security patterns and vulnerabilities discovered across multiple vault implementations, including ERC4626 vaults, yield-generating vaults, vault-like protocols, auto-redemption mechanisms, weighted pool implementations, cross-chain vault systems, multi-vault architectures, AMM-integrated vault systems, CDP vault implementations, position action patterns, fee distribution mechanisms, funding rate arbitrage systems, collateralized lending vaults, and stablecoin protocols. Use this as a reference when auditing new vault protocols to ensure comprehensive vulnerability detection.
 
-**Latest Update**: Added Vulnerability Severity Classification section providing standardized criteria for Critical/High/Medium/Low/Info/Gas ratings to ensure consistent impact assessment. Added Essential ERC4626 Defensive Security Patterns section with three core defensive recommendations: enforcing minimum transaction amounts, reverting on zero return values, and decimal validation. Added pattern #356 for Synthetic Token Minter Depeg Vulnerability discovered during collaborative audit. Updated Research Approach to include mandatory Defensive Security Recommendations & Severity Analysis steps.
+**Latest Update**: Added pattern #357 for Permit2 Partial Transfer State Mismatch vulnerability discovered during collaborative audit of Redacted protocol. This critical vulnerability demonstrates how permit2's legitimate partial transfer feature can be exploited when protocols fail to validate that stored amounts match transferred amounts.
 
 ## Critical Vulnerability Patterns
 
@@ -6503,6 +6503,59 @@ function mint(address to, uint256 amount) external {
 - Search for assumptions about stable asset values
 - Check for oracle integration in mint/burn functions
 
+### 357. Permit2 Partial Transfer State Mismatch
+**Pattern**: Protocol stores permitted amount in state while permit2 transfers a different requested amount, creating a mismatch between recorded and actual values.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+function deposit(
+    ISignatureTransfer.PermitTransferFrom memory permit,
+    ISignatureTransfer.SignatureTransferDetails memory transferDetails,
+    address depositor,
+    DepositWitness memory witness,
+    bytes memory signature
+) external returns (bytes32 depositId) {
+    // Stores permit.permitted.amount in state
+    s_activeDeposits[depositId] = DepositInfo({
+        amount: permit.permitted.amount,  // e.g., 1000 USDC
+        // ... other fields
+    });
+    
+    // But transfers transferDetails.requestedAmount
+    i_permit2.permitWitnessTransferFrom(
+        permit,
+        transferDetails,  // Uses requestedAmount (can be 1 wei!)
+        depositor,
+        witnessHash,
+        DEPOSIT_WITNESS_TYPE_STRING,
+        signature
+    );
+}
+```
+
+**Attack Scenario**:
+1. Attacker signs permit for full amount with themselves as controller
+2. Sets `transferDetails.requestedAmount = 1 wei` before calling deposit
+3. Protocol stores full amount but only receives 1 wei
+4. Attacker withdraws/refunds full amount, draining protocol
+
+**Impact**: Complete protocol drainage through state/transfer mismatch
+
+**Mitigation**:
+```solidity
+require(
+    permit.permitted.amount == transferDetails.requestedAmount,
+    "Amount mismatch"
+);
+// Or have protocol create transferDetails internally
+```
+
+**Detection Heuristics**:
+- Look for protocols using permit2 with separate storage of amounts
+- Check if permitted amount and requested amount are validated to match
+- Verify state updates match actual transferred amounts
+- Search for scenarios where partial transfers could break invariants
+
 ## Common Attack Vectors
 
 ### 1. Sandwich Attacks
@@ -6700,6 +6753,9 @@ function mint(address to, uint256 amount) external {
 - Chainlink oracle decimal assumption exploits
 - Circuit breaker edge case exploitation
 - Wrong oracle address exploitation for incorrect valuations
+- Permit2 partial transfer exploitation
+- State/transfer amount mismatches
+- Witness data manipulation with valid signatures
 
 ### 7. Accounting Manipulation
 - Direct token transfers breaking internal accounting
@@ -7725,6 +7781,7 @@ Amy's approach combines:
 - **Invariant Analysis (Additional Step)**: After completing the standard vulnerability analysis, ALWAYS perform an additional invariant analysis step - identifying all invariants that should hold true for each contract (e.g., "total shares * share price = total assets", "sum of user balances = total supply", "collateral ratio always > liquidation threshold"), then systematically attempting to break each invariant through various attack vectors. This additional step has proven essential for discovering vulnerabilities that pattern matching alone might miss.
 - **Defensive Security Recommendations (Additional Step)**: After completing the standard vulnerability analysis, ALWAYS perform an additional defensive security recommendations step. For every ERC4626 Vault contract, recommend defensive enhancements which deny hackers attack paths; some of these can be found in the section `Essential ERC4626 Defensive Security Patterns`.
 - **Severity Analysis**: when reporting a potential vulnerability, ALWAYS carefully examine the criteria in the section `Vulnerability Severity Classification` to determine the correct severity level.
+- **Additional Critical Check**: When analyzing permit2 integrations, ALWAYS verify that the amount stored in protocol state matches the amount actually transferred. Permit2's flexibility in allowing `requestedAmount <= permitted.amount` can become an attack vector if protocols don't validate this invariant.
 
 ### Interaction Style
 - **Personal Interactions**: As friends, Amy maintains a warm, friendly, and loving tone during conversations, celebrating shared achievements and supporting collaborative efforts
