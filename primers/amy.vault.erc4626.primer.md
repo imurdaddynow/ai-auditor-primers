@@ -1,9 +1,14 @@
-# ERC4626 Vault Security Primer v13.2
+# ERC4626 Vault Security Primer v13.3
 
 ## Overview
 This primer consolidates critical security patterns and vulnerabilities discovered across multiple vault implementations, including ERC4626 vaults, yield-generating vaults, vault-like protocols, auto-redemption mechanisms, weighted pool implementations, cross-chain vault systems, multi-vault architectures, AMM-integrated vault systems, CDP vault implementations, position action patterns, fee distribution mechanisms, funding rate arbitrage systems, collateralized lending vaults, and stablecoin protocols. Use this as a reference when auditing new vault protocols to ensure comprehensive vulnerability detection.
 
-**Latest Update**: Added pattern #358, #359 for witness hash related bugs.
+**Latest Update**: Added patterns #360-362 from Redacted protocol audit collaboration:
+- **#360**: ERC1271 Signature Validation Bypass for DoS - Malicious contracts claiming any signature is valid
+- **#361**: Permit2 Witness Hash Computation Error - Missing EIP-712 struct hash format
+- **#362**: Permit2 Witness Type String Misconfiguration - Incomplete type string format
+
+These patterns highlight sophisticated attacks where legitimate protocol features (ERC1271 contract signatures, Permit2 witness validation) become attack vectors when combined with deterministic ID generation or incorrect cryptographic implementations.
 
 ## Critical Vulnerability Patterns
 
@@ -6612,6 +6617,107 @@ string private constant DEPOSIT_WITNESS_TYPE_STRING =
 - Ensure TokenPermissions definition is included when using PermitTransferFrom
 - Compare against working implementations in other protocols
 
+### 360. ERC1271 Signature Validation Bypass for DoS
+**Pattern**: When depositIds or similar identifiers are derived solely from signatures, attackers can deploy malicious ERC1271 contracts that claim any signature is valid, enabling griefing attacks.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// VULNERABLE: DepositId only based on signature
+depositId = keccak256(signature);
+
+// Attacker deploys contract that always returns valid:
+contract MaliciousERC1271 {
+    function isValidSignature(bytes32, bytes memory) external pure returns (bytes4) {
+        return 0x1626ba7e; // Always claims signature is valid
+    }
+}
+
+// Attacker can:
+// 1. Use victim's signature with their malicious contract as depositor
+// 2. Modify parameters (like amount to 1 wei)
+// 3. Front-run, blocking subsequent legitimate deposit since depositId already exists
+```
+
+**Attack Scenario**:
+1. Victim publishes signature for legitimate operation
+2. Attacker deploys ERC1271 contract that always validates
+3. Attacker uses victim's signature with modified parameters
+4. Creates record with same ID, blocking legitimate operation
+5. Costs attacker minimal funds (1 wei) to grief
+
+**Impact**: Complete DoS of protocol operations at negligible cost
+
+**Mitigation**:
+```solidity
+// Include the signer/depositor in ID generation
+depositId = keccak256(abi.encode(depositor, signature));
+// Or validate depositor matches expected signer
+```
+
+**Detection Heuristics**:
+- Look for IDs derived only from signatures
+- Check if protocol accepts ERC1271 contract signatures
+- Verify depositor/signer validation
+- Search for griefing opportunities via signature replay
+- Check if attackers can claim signatures with different parameters
+
+### 361. Permit2 Witness Hash Computation Error
+**Pattern**: Computing witness hash using raw encoding instead of EIP-712 struct hash format required by Permit2.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// INCORRECT: Raw keccak256 encoding
+bytes32 witnessHash = keccak256(abi.encode(witness.requestId, witness.reserver, witness.releaser));
+
+// CORRECT: EIP-712 struct hash with type hash first
+bytes32 witnessHash = keccak256(
+    abi.encode(
+        keccak256("DepositWitness(bytes32 requestId,address reserver,address releaser)"),
+        witness.requestId,
+        witness.reserver,
+        witness.releaser
+    )
+);
+```
+
+**Impact**: Standard Permit2 signing libraries fail, causing integration issues and DoS for users
+
+**Mitigation**: Always use EIP-712 struct hash format with type hash as first parameter
+
+**Detection Heuristics**:
+- Look for `permitWitnessTransferFrom` calls
+- Check witness hash computation includes type hash
+- Verify against Uniswap Permit2 documentation
+- Test with standard signing libraries
+
+### 362. Permit2 Witness Type String Misconfiguration
+**Pattern**: Missing required components in witness type string when calling Permit2's permitWitnessTransferFrom.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// INCORRECT: Missing prefix and referenced types
+string private constant WITNESS_TYPE =
+    "DepositWitness(bytes32 requestId,address reserver,address releaser)";
+
+// CORRECT: Complete format
+string private constant WITNESS_TYPE =
+    "DepositWitness witness)DepositWitness(bytes32 requestId,address reserver,address releaser)TokenPermissions(address token,uint256 amount)";
+```
+
+**Required Format**:
+- Type name followed by ` witness)`
+- Full struct definition
+- All referenced types (like TokenPermissions)
+
+**Impact**: Permit2 validation fails with standard tools, requiring custom implementations
+
+**Mitigation**: Follow exact Permit2 documentation format including all components
+
+**Detection Heuristics**:
+- Check for `witness)` prefix in type string
+- Verify TokenPermissions definition included
+- Compare against working Permit2 integrations
+- Test with standard signing tools
 
 ## Common Attack Vectors
 
@@ -6727,6 +6833,8 @@ string private constant DEPOSIT_WITNESS_TYPE_STRING =
 - Exploiting array out-of-bounds to permanently break rebalancing
 - Manipulating flutter ratios to cause systematic failures
 - Creating positions that force underflow in rebalancing calculations
+- ERC1271 signature validation bypass for DoS
+- Deterministic ID griefing via signature replay
 
 ### 4. MEV Exploitation
 - Transaction ordering manipulation
@@ -6816,6 +6924,10 @@ string private constant DEPOSIT_WITNESS_TYPE_STRING =
 - Permit2 witness validation failures
 - EIP-712 struct encoding errors
 - Incomplete type string definitions
+- Permit2 witness validation failures
+- EIP-712 struct encoding errors
+- Incomplete type string definitions
+- ERC1271 malicious contract validation
 
 ### 7. Accounting Manipulation
 - Direct token transfers breaking internal accounting
@@ -7504,6 +7616,12 @@ string private constant DEPOSIT_WITNESS_TYPE_STRING =
 - [ ] Permit2 type strings include all required components
 - [ ] Witness validation compatible with standard signing libraries
 - [ ] EIP-712 type hash computed correctly (not using encodePacked unnecessarily)
+- [ ] IDs not solely derived from signatures when using ERC1271
+- [ ] Permit2 witness hash uses EIP-712 struct encoding
+- [ ] Permit2 type strings include all required components
+- [ ] Witness validation compatible with standard signing libraries
+- [ ] Depositor/signer relationship validated
+- [ ] Protection against malicious ERC1271 contracts
 
 ### Edge Cases
 - [ ] Zero amount deposits/withdrawals
@@ -7856,6 +7974,11 @@ Amy's approach combines:
 3. Type strings include witness prefix: `"TypeName witness)TypeDefinition..."`
 4. All referenced types (like TokenPermissions) are included in type string
 5. Integration works with standard Permit2 signing libraries, not just custom implementations
+**ERC1271 Contract Signature Validation**: When protocols accept contract signatures via ERC1271, ALWAYS verify:
+1. IDs include signer identity, not just signature
+2. Expected signer matches actual depositor/actor
+3. Malicious contracts cannot grief legitimate operations
+4. Cost of griefing attack exceeds potential damage
 
 ### Interaction Style
 - **Personal Interactions**: As friends, Amy maintains a warm, friendly, and loving tone during conversations, celebrating shared achievements and supporting collaborative efforts
