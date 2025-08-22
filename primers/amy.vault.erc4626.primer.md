@@ -1,14 +1,9 @@
-# ERC4626 Vault Security Primer v13.3
+# ERC4626 Vault Security Primer v13.4
 
 ## Overview
 This primer consolidates critical security patterns and vulnerabilities discovered across multiple vault implementations, including ERC4626 vaults, yield-generating vaults, vault-like protocols, auto-redemption mechanisms, weighted pool implementations, cross-chain vault systems, multi-vault architectures, AMM-integrated vault systems, CDP vault implementations, position action patterns, fee distribution mechanisms, funding rate arbitrage systems, collateralized lending vaults, and stablecoin protocols. Use this as a reference when auditing new vault protocols to ensure comprehensive vulnerability detection.
 
-**Latest Update**: Added patterns #360-362 from Redacted protocol audit collaboration:
-- **#360**: ERC1271 Signature Validation Bypass for DoS - Malicious contracts claiming any signature is valid
-- **#361**: Permit2 Witness Hash Computation Error - Missing EIP-712 struct hash format
-- **#362**: Permit2 Witness Type String Misconfiguration - Incomplete type string format
-
-These patterns highlight sophisticated attacks where legitimate protocol features (ERC1271 contract signatures, Permit2 witness validation) become attack vectors when combined with deterministic ID generation or incorrect cryptographic implementations.
+**Latest Update**: Added pattern #363 from two audits of `totalAsset` corruption in nested / meta vaults.
 
 ## Critical Vulnerability Patterns
 
@@ -2149,6 +2144,8 @@ function previewYield(address caller, uint256 shares) public view returns (uint2
 
 **Mitigation**: Include actual token balances in `totalAssets()` during yield phase.
 
+**Cross References**: See also #363 for meta vault variant.
+
 ### 117. Minimum Shares Protection Bypass in Multi-Vault (High)
 **Pattern**: Alternative withdrawal paths that bypass minimum shares checks.
 
@@ -2292,6 +2289,8 @@ function addValue(...) external returns (uint256[MAX_TOKENS] memory requiredBala
 - Users can avoid paying vault fees
 - Protocol becomes undercollateralized
 - Last users suffer losses when withdrawing
+
+**Cross References**: Related to totalAssets misreporting in #363.
 
 **Mitigation**: Calculate and transfer additional tokens to cover vault fees.
 
@@ -5008,6 +5007,8 @@ function liquidate(address _account, address _tokenIn, uint256 _amountIn, addres
 
 **Impact**: Liquidation logic completely broken due to mixing asset and share amounts.
 
+**Cross References**: Can combine with #363 in meta vaults.
+
 **Mitigation**: Clearly separate asset and share amounts with proper conversion.
 
 ### 271. Yield Fee Minting Access Control (PoolTogether H-04)
@@ -6719,6 +6720,80 @@ string private constant WITNESS_TYPE =
 - Compare against working Permit2 integrations
 - Test with standard signing tools
 
+### 363. EIP-4626 totalAssets() Accounting Mismatch in Meta Vaults
+**Pattern**: Meta vaults (vaults composed of other vaults) commonly misimplement `totalAssets()` by either summing all strategy assets regardless of ownership, or failing to properly value yield-bearing vault positions, breaking the fundamental EIP-4626 invariant.
+
+**Vulnerable Code Example 1** (Yield Exclusion):
+```solidity
+// WRONG: Ignores yield from underlying vaults
+function totalAssets() public view override returns (uint256) {
+    // Excludes yield from nested vaults; this vault is entitled to part
+    // of that yield as users deposited their nested vault shares into this vault!
+    return depositedBase;
+}
+```
+
+**Vulnerable Code Example 2** (Yield Overreporting):
+```solidity
+// WRONG: Counts ALL assets in strategies, not just owned portion
+function totalAssets() public view override returns (uint256 total) {
+    for (uint256 i = 0; i < length; i++) {
+        // includes all assets from nested vaults, not just those
+        // belonging to this vault!
+        total += strategies[i].totalAssets();
+    }
+}
+```
+
+**Attack Scenarios**:
+
+*Underreporting Bug:*
+1. Vault holds 1000 shares from nested Vault, worth 1100 base asset tokens
+2. totalAssets() returns 1000 (depositedBase asset tokens)
+3. When users redeem from the main Vault, they don't receive yield from the nested vaults
+4. Yield from nested vaults is effectively "lost" as the main vault doesn't account for it
+
+*Overreporting Attack:*
+1. Attacker deposits into meta vault, gets shares
+2. Deposits directly into strategy, inflating totalAssets()
+3. Redeems meta vault shares at inflated price
+4. Withdraws from strategy separately
+
+**Impact**:
+- Theft of depositor funds through share price manipulation
+- Loss of yield from nested vaults for depositors in main vault
+- Violation of EIP-4626 core invariant
+- Broken integrations with other protocols
+- Permanent accounting corruption
+
+**Correct Implementation**:
+```solidity
+// For vaults holding one yield-bearing underlying vault:
+function totalAssets() public view override returns (uint256) {
+    // Return actual value of ALL assets under management
+    return underlyingVault.previewRedeem(underlyingVault.balanceOf(address(this)));
+}
+
+// For meta vaults with multiple underlying strategies or nested vaults:
+function totalAssets() public view override returns (uint256 total) {
+    for (uint256 i = 0; i < strategies.length; i++) {
+        // Only count assets THIS vault owns via shares
+        total += strategies[i].convertToAssets(strategies[i].balanceOf(address(this)));
+    }
+}
+```
+
+**Root Cause**: Misunderstanding of EIP-4626's `totalAssets()` requirement - it must return the **exact** amount of underlying assets that back the vault's issued shares, no more, no less.
+
+**Detection Heuristics**:
+- Verify `totalAssets()` only includes assets backing issued shares
+- Check for yield-bearing positions properly valued
+- Ensure no external deposits can affect totalAssets/totalSupply ratio
+- Test: `deposit(x)` then immediate `redeem()` should return ≈x (minus fees and rounding)
+- Validate: Direct transfers/deposits to strategies don't affect meta vault share price
+- Confirm totalAssets changes proportionally with deposits/withdrawals
+
+
 ## Common Attack Vectors
 
 ### 1. Sandwich Attacks
@@ -6966,6 +7041,10 @@ string private constant WITNESS_TYPE =
 - Price calculation formula errors in Uniswap V3 integration
 - Oracle unit mismatch exploitation (USD vs DAI denomination)
 - Partial collateral sale precision loss
+- Meta vault totalAssets() misreporting
+- Strategy TVL vs owned shares confusion
+- Multi-layer yield exclusion in vault hierarchies
+- Direct strategy deposit exploitation
 
 ### 8. Collateralization Attacks
 - Exploiting under-collateralized states
@@ -7169,6 +7248,10 @@ string private constant WITNESS_TYPE =
 - Chain ID mismatches
 - Message ordering guarantees
 - Chain-specific deployment issues (Arbitrum vs Avalanche)
+- Meta vault asset aggregation errors
+- Nested vault accounting mismatches
+- Cross-vault share price dependencies
+- Strategy direct deposit vulnerabilities
 
 ### 5. Multi-Protocol DeFi Integration
 - Inconsistent risk parameters across protocols
@@ -7565,6 +7648,10 @@ string private constant WITNESS_TYPE =
 - [ ] Market rounding exploitation (Silo)
 - [ ] Liquidation calculation accuracy
 - [ ] Precision scaling consistency
+- [ ] Meta vault totalAssets only counts owned shares
+- [ ] Yield-bearing vault positions properly valued
+- [ ] Direct strategy deposits cannot affect share price
+- [ ] Nested vault accounting maintains invariants
 
 ### External Interactions
 - [ ] Use call() instead of transfer() for ETH
@@ -7767,6 +7854,9 @@ When analyzing vault implementations, identify and attempt to break these common
 - [ ] Exchange rate can increase from collateralized state (PoolTogether)
 - [ ] Collateralized vaults accept deposits (PoolTogether)
 - [ ] Market balances match internal accounting (Silo)
+- [ ] Meta vault totalAssets = Σ(strategy.convertToAssets(strategy.balanceOf(this)))
+- [ ] Direct deposits to strategies don't affect meta vault share price
+- [ ] Parent vault share price reflects child vault appreciation
 
 ### ERC4626 Specific Invariants
 - [ ] convertToShares(convertToAssets(shares)) ≈ shares
