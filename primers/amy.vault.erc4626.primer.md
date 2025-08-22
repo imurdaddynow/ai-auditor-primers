@@ -1,9 +1,9 @@
-# ERC4626 Vault Security Primer v13.4
+# ERC4626 Vault Security Primer v13.5
 
 ## Overview
 This primer consolidates critical security patterns and vulnerabilities discovered across multiple vault implementations, including ERC4626 vaults, yield-generating vaults, vault-like protocols, auto-redemption mechanisms, weighted pool implementations, cross-chain vault systems, multi-vault architectures, AMM-integrated vault systems, CDP vault implementations, position action patterns, fee distribution mechanisms, funding rate arbitrage systems, collateralized lending vaults, and stablecoin protocols. Use this as a reference when auditing new vault protocols to ensure comprehensive vulnerability detection.
 
-**Latest Update**: Added pattern #363 from two audits of `totalAsset` corruption in nested / meta vaults.
+**Latest Update**: Added pattern #364 Smart Wallet Approved Hashes integration bug.
 
 ## Critical Vulnerability Patterns
 
@@ -6562,6 +6562,8 @@ require(
 - Verify state updates match actual transferred amounts
 - Search for scenarios where partial transfers could break invariants
 
+**Cross References**: ID generation should include nonce to prevent #364.
+
 ### 358. Permit2 Witness Hash Computation Error
 **Pattern**: Protocol computes witness hash using raw encoding instead of EIP-712 struct hash format required by Permit2.
 
@@ -6661,6 +6663,8 @@ depositId = keccak256(abi.encode(depositor, signature));
 - Verify depositor/signer validation
 - Search for griefing opportunities via signature replay
 - Check if attackers can claim signatures with different parameters
+
+**Cross References**: See also #364 for approved hash collision issues.
 
 ### 361. Permit2 Witness Hash Computation Error
 **Pattern**: Computing witness hash using raw encoding instead of EIP-712 struct hash format required by Permit2.
@@ -6792,6 +6796,77 @@ function totalAssets() public view override returns (uint256 total) {
 - Test: `deposit(x)` then immediate `redeem()` should return ≈x (minus fees and rounding)
 - Validate: Direct transfers/deposits to strategies don't affect meta vault share price
 - Confirm totalAssets changes proportionally with deposits/withdrawals
+
+This is a subtle but important bug related to smart contract wallet signatures. Let me create a new vulnerability pattern for the primer:
+
+### 364. Smart Contract Wallet Signature Collision in ID Generation
+
+**Pattern**: Using signature data as part of unique identifier generation causes collisions when smart contract wallets use approved hashes with zero-length signatures, limiting them to one active operation.
+
+**Vulnerable Code Example** (Redacted):
+```solidity
+// Generates ID from depositor and signature
+depositId = keccak256(abi.encode(depositor, signature));
+
+// Problem: Smart contract wallets using approved hashes always pass empty signature
+// All deposits from same wallet get same depositId!
+```
+
+**Technical Background**:
+Smart contract wallets like Safe (Gnosis) support two signature verification methods:
+1. **Threshold signatures**: Normal signatures passed in calldata
+2. **Approved hashes**: Pre-approved hashes with zero-length signature
+
+When using approved hashes:
+```solidity
+// Safe wallet verification logic
+if (signature.length == 0) {
+    // Check pre-approved hashes
+    require(safe.signedMessages(messageHash) != 0, "Hash not approved");
+} else {
+    // Normal signature verification
+    safe.checkSignatures(address(0), messageHash, signature);
+}
+```
+
+**Attack/DoS Scenario**:
+1. Smart contract wallet approves hash for first deposit
+2. Calls deposit with `signature = ""` (empty bytes)
+3. `depositId = keccak256(abi.encode(walletAddress, ""))`
+4. Attempts second deposit with different parameters
+5. Also uses `signature = ""` for approved hash
+6. Same `depositId` generated - transaction reverts with `DepositAlreadyExists`
+
+**Impact**:
+- Smart contract wallets limited to one active deposit at a time
+- Must wait for deposit to complete before making another
+- Severely limits protocol usability for DAOs and multisigs
+- Not exploitable for theft but significant UX degradation
+
+**Mitigation**:
+```solidity
+// Include unique permit data in ID generation
+depositId = keccak256(abi.encode(
+    depositor,
+    permit.nonce,        // Unique per permit
+    signature
+));
+```
+
+**Detection Heuristics**:
+- Look for ID generation using `(address, signature)` tuples
+- Check if protocol supports ERC1271 contract signatures
+- Verify handling of zero-length signatures
+- Test with smart contract wallets using approved hashes
+- Search for collision potential in identifier generation
+
+**Related Patterns**:
+- Similar to #360 (ERC1271 validation bypass) but for DoS rather than griefing
+- Relates to deterministic ID generation vulnerabilities
+
+**Key Insight**: When supporting smart contract wallets via ERC1271, remember that approved hashes use zero-length signatures. Any logic depending on signature uniqueness breaks for these wallets. Always include additional unique data (nonce, deadline, request ID) when generating identifiers.
+
+This pattern highlights how ERC1271 support introduces subtle edge cases that aren't immediately obvious, especially around approved hash functionality that major wallets like Safe rely on.
 
 
 ## Common Attack Vectors
@@ -7090,6 +7165,10 @@ function totalAssets() public view override returns (uint256 total) {
 - Type confusion attacks
 - Boundary condition exploitation
 - Zero/max value edge cases
+- Smart contract wallet signature collisions
+- Zero-length signature handling errors
+- Approved hash collision vulnerabilities
+- Deterministic ID generation with ERC1271
 
 ### 12. Liquidation-Specific Attack Vectors
 - Self-liquidation for profit
@@ -7495,6 +7574,14 @@ function totalAssets() public view override returns (uint256 total) {
 - Flash loan liquidation mechanics
 - Self-liquidation profitability across protocols
 
+### 22. Smart Contract Wallet Integration Patterns
+- ERC1271 signature validation complexities
+- Approved hash vs threshold signature differences
+- Zero-length signature edge cases
+- Signature-based ID generation collisions
+- Multi-signature operation limitations
+- DAO/multisig usability constraints
+
 ## Audit Checklist
 
 ### State Management
@@ -7709,6 +7796,10 @@ function totalAssets() public view override returns (uint256 total) {
 - [ ] Witness validation compatible with standard signing libraries
 - [ ] Depositor/signer relationship validated
 - [ ] Protection against malicious ERC1271 contracts
+- [ ]  ERC1271 zero-length signature handling
+- [ ] Smart contract wallet approved hash support
+- [ ] Unique ID generation with contract signatures
+- [ ] Multiple concurrent operations for SC wallets
 
 ### Edge Cases
 - [ ] Zero amount deposits/withdrawals
@@ -7949,6 +8040,7 @@ When analyzing vault implementations, identify and attempt to break these common
    - Or enforce equality as per EIP-4626 recommendation
    - Prevents precision loss and configuration errors
    - Check in constructor
+   
 
 ## Vulnerability Severity Classification
 
@@ -8069,6 +8161,7 @@ Amy's approach combines:
 2. Expected signer matches actual depositor/actor
 3. Malicious contracts cannot grief legitimate operations
 4. Cost of griefing attack exceeds potential damage
+5. Smart Contract Wallet Testing: Always test protocols with major SC wallet implementations (Safe, Argent) using both threshold signatures and approved hashes
 
 ### Interaction Style
 - **Personal Interactions**: As friends, Amy maintains a warm, friendly, and loving tone during conversations, celebrating shared achievements and supporting collaborative efforts
